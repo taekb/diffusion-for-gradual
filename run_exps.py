@@ -5,6 +5,7 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 import argparse
+from collections import defaultdict
 from datetime import datetime
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -26,6 +27,8 @@ from sklearn.model_selection import train_test_split
 
 # CONSTANTS
 DATA_PATH = './dataset.pkl'
+DIFF_PATH_1 = './class0_compressed_12288x64x64.npz'
+DIFF_PATH_2 = './class1_compressed_12288x64x64.npz'
 DEFAULT_SEED = 1
 GENERATOR_CONFIG = dict(
     batch_size=256
@@ -81,8 +84,9 @@ def get_model_orig(dropout=0.5, seed=DEFAULT_SEED):
     ])
 
 def load_data():
-    '''Loads the source, intermediate, and target domain datasets.'''
+    '''Loads the source, intermediate, and target domain datasets and the fine-tuned diffusion-model samples.'''
 
+    # Load original dataset
     with open(DATA_PATH, 'rb') as fh:
         dataset = pickle.load(fh)
 
@@ -90,8 +94,17 @@ def load_data():
     print(f'Intermediate 1: {dataset["inter_1"][0].shape}, {dataset["inter_1"][1].shape}')
     print(f'Intermediate 2: {dataset["inter_2"][0].shape}, {dataset["inter_2"][1].shape}')
     print(f'Target: {dataset["target"][0].shape}, {dataset["target"][1].shape}\n')
+
+    # Load the sampled data from fine-tuned diffusion models
+    diff_data_1 = np.load(DIFF_PATH_1)['array'][...,None]
+    diff_data_2 = np.load(DIFF_PATH_2)['array'][...,None]
     
-    return dataset
+    diff_dataset = dict(
+        inter_1=diff_data_1,
+        inter_2=diff_data_2
+    )
+    
+    return dataset, diff_dataset
 
 def exp_no_adapt(dataset, seed=DEFAULT_SEED):
     '''No adaptation baseline.'''
@@ -226,7 +239,7 @@ def exp_direct(dataset, seed=DEFAULT_SEED):
     return new_model, final_acc
 
 # TODO: Modify this code to add samples from diffusion model
-def exp_gradual(dataset, n_samples=3000, seed=DEFAULT_SEED):
+def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     '''Gradual adaptation approach, with two unlabeled intermediate domain data.'''
 
     # NOTE: n_samples is the number of randomly sampled data from each intermediate domain
@@ -257,9 +270,21 @@ def exp_gradual(dataset, n_samples=3000, seed=DEFAULT_SEED):
                   callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
               )
     
-    # Get train-val split on first intermediate data
+    # Randomly subsample a set number of diffusion model samples
     X_inter_1, Y_inter_1 = dataset['inter_1']
-    idxs_1 = np.arange(0, X_inter_1.shape[0]) # TODO: Modify this to randomly subsample the full intermediate data before splitting
+    X2_inter_1 = diff_dataset['inter_1'] #  Diffusion model samples for first intermediate domain
+    idxs = np.arange(0,X2_inter_1.shape[0])
+    sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
+    X2_inter_1 = X2_inter_1[sampled_idxs] # Subsampled diffusion model samples
+
+    # Append diffusion model samples to original data with dummy target labels
+    X_inter_1 = np.concatenate([X_inter_1, X2_inter_1], axis=0)
+    Y_inter_1 = np.concatenate([Y_inter_1, np.zeros((n_samples,2))], axis=0)
+    print(f'Appended {n_samples} diffusion samples to first intermediate domain data.')
+    print(f'X: {X_inter_1.shape}')
+    print(f'Y: {Y_inter_1.shape}')
+
+    # Get train-val split on first intermediate data
     X_inter_1_train, X_inter_1_val, Y_inter_1_train, Y_inter_1_val = train_test_split(X_inter_1, Y_inter_1, test_size=0.2, random_state=seed)
 
     # Generate pseudolabels for first intermediate data using source model
@@ -291,10 +316,21 @@ def exp_gradual(dataset, n_samples=3000, seed=DEFAULT_SEED):
                           callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
                       )
     
-    # Get train-val split on second intermediate data
+    # Randomly subsample a set number of diffusion model samples
     X_inter_2, Y_inter_2 = dataset['inter_2']
-    idxs_2 = np.arange(0, X_inter_2.shape[0]) # TODO: Modify this to randomly subsample the full intermediate data before splitting
-    # NOTE: Should also use np.random.seed() to fix the seed before random subsampling
+    X2_inter_2 = diff_dataset['inter_2'] #  Diffusion model samples for first intermediate domain
+    idxs = np.arange(0,X2_inter_2.shape[0])
+    sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
+    X2_inter_2 = X2_inter_2[sampled_idxs] # Subsampled diffusion model samples
+
+    # Append diffusion model samples to original data with dummy target labels
+    X_inter_2 = np.concatenate([X_inter_2, X2_inter_2], axis=0)
+    Y_inter_2 = np.concatenate([Y_inter_2, np.zeros((n_samples,2))], axis=0)
+    print(f'Appended {n_samples} diffusion samples to second intermediate domain data.')
+    print(f'X: {X_inter_2.shape}')
+    print(f'Y: {Y_inter_2.shape}')
+
+    # Get train-val split on second intermediate data
     X_inter_2_train, X_inter_2_val, Y_inter_2_train, Y_inter_2_val = train_test_split(X_inter_2, Y_inter_2, test_size=0.2, random_state=seed)
 
     # Generate pseudolabels for second intermediate data using first intermediate model
@@ -373,7 +409,7 @@ def exp_gradual(dataset, n_samples=3000, seed=DEFAULT_SEED):
     print(f'\nAccuracy on Target Test Data: {final_acc}')
 
     # Save the trained model
-    target_model.save(f'./models/gradual_{seed}.h5')
+    target_model.save(f'./models/gradual_{n_samples}_{seed}.h5')
 
     return target_model, final_acc
 
@@ -425,24 +461,8 @@ def exp_oracle(dataset, seed=DEFAULT_SEED):
     return model, final_acc
 
 def main(**kwargs):
-    exp = kwargs['exp']
+    #exp = kwargs['exp']
     seeds = kwargs['seeds']
-
-    if exp == 'no-adapt':
-        exp_f = exp_no_adapt
-        print('Training the "No Adaptation" baseline.')
-
-    elif exp == 'direct':
-        exp_f = exp_direct
-        print('Training the "Direct Adaptation" baseline.')
-
-    elif exp == 'gradual':
-        exp_f = exp_gradual
-        print('Training the "Gradual Adaptation" model.')
-
-    else:
-        exp_f = exp_oracle
-        print('Training the "Oracle" model.')
 
     if not osp.exists('./models'):
         os.mkdir('./models')
@@ -451,18 +471,57 @@ def main(**kwargs):
     print(tf.config.list_physical_devices('GPU'))
 
     # Load the dataset
-    dataset = load_data()
+    dataset, diff_dataset = load_data()
 
-    accs = []
-    for i, seed in enumerate(seeds):
-        loss, acc = exp_f(dataset, seed=seed)
-        accs.append(acc)
+    model_names = [
+        'no-adapt',
+        'direct',
+        'gradual_3000',
+        'gradual_6000',
+        'gradual_9000',
+        'gradual_12000',
+        'oracle'
+    ]
+    acc_dict = defaultdict(list)
+    start_time = datetime.now()
 
-    print(f'Mean Accuracy: {np.mean(accs)}, Std: {np.std(accs)}')
+    for model_name in model_names:
+        model = model_name.split('_')[0]
+
+        if model == 'no-adapt':
+            exp_f = exp_no_adapt
+            print('Training the "No Adaptation" baseline.')
+
+        elif model == 'direct':
+            exp_f = exp_direct
+            print('Training the "Direct Adaptation" baseline.')
+
+        elif model == 'gradual':
+            exp_f = exp_gradual
+            print('Training the "Gradual Adaptation" model.')
+
+        else:
+            exp_f = exp_oracle
+            print('Training the "Oracle" model.')
+
+        for i, seed in enumerate(seeds):
+            print(f'[{i+1}] Manual Seed = {seed}')
+            if model == 'gradual':
+                loss, acc = exp_f(dataset, diff_dataset, seed=seed)
+            else:
+                loss, acc = exp_f(dataset, seed=seed)
+
+            acc_dict[model_name].append(acc)
+
+    with open('./adapt_results.pkl', 'wb') as fh:
+        pickle.dump(acc_dict, fh)
+
+    for model_name in model_names:
+        print(f'[{model_name}] Mean={np.mean(acc_dict[model_name])}, Std={np.std(acc_dict[model_name])}')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--exp', help='Choice of experiment to run', default='gradual', type=str)
+    #parser.add_argument('--exp', help='Choice of experiment to run', default='gradual', type=str)
     parser.add_argument('--seeds', help='Random seeds', default=[DEFAULT_SEED], nargs='*', type=int)
     args = parser.parse_args()
 
