@@ -238,7 +238,6 @@ def exp_direct(dataset, seed=DEFAULT_SEED):
 
     return new_model, final_acc
 
-# TODO: Modify this code to add samples from diffusion model
 def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     '''Gradual adaptation approach, with two unlabeled intermediate domain data.'''
 
@@ -272,15 +271,18 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     
     # Randomly subsample a set number of diffusion model samples
     X_inter_1, Y_inter_1 = dataset['inter_1']
-    X2_inter_1 = diff_dataset['inter_1'] #  Diffusion model samples for first intermediate domain
-    idxs = np.arange(0,X2_inter_1.shape[0])
-    sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
-    X2_inter_1 = X2_inter_1[sampled_idxs] # Subsampled diffusion model samples
 
-    # Append diffusion model samples to original data with dummy target labels
-    X_inter_1 = np.concatenate([X_inter_1, X2_inter_1], axis=0)
-    Y_inter_1 = np.concatenate([Y_inter_1, np.zeros((n_samples,2))], axis=0)
-    print(f'Appended {n_samples} diffusion samples to first intermediate domain data.')
+    if n_samples > 0:
+        X2_inter_1 = diff_dataset['inter_1'] #  Diffusion model samples for first intermediate domain
+        idxs = np.arange(0,X2_inter_1.shape[0])
+        sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
+        X2_inter_1 = X2_inter_1[sampled_idxs] # Subsampled diffusion model samples
+
+        # Append diffusion model samples to original data with dummy target labels
+        X_inter_1 = np.concatenate([X_inter_1, X2_inter_1], axis=0)
+        Y_inter_1 = np.concatenate([Y_inter_1, np.zeros((n_samples,2))], axis=0)
+        print(f'Appended {n_samples} diffusion samples to first intermediate domain data.')
+    
     print(f'X: {X_inter_1.shape}')
     print(f'Y: {Y_inter_1.shape}')
 
@@ -318,15 +320,18 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     
     # Randomly subsample a set number of diffusion model samples
     X_inter_2, Y_inter_2 = dataset['inter_2']
-    X2_inter_2 = diff_dataset['inter_2'] #  Diffusion model samples for first intermediate domain
-    idxs = np.arange(0,X2_inter_2.shape[0])
-    sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
-    X2_inter_2 = X2_inter_2[sampled_idxs] # Subsampled diffusion model samples
 
-    # Append diffusion model samples to original data with dummy target labels
-    X_inter_2 = np.concatenate([X_inter_2, X2_inter_2], axis=0)
-    Y_inter_2 = np.concatenate([Y_inter_2, np.zeros((n_samples,2))], axis=0)
-    print(f'Appended {n_samples} diffusion samples to second intermediate domain data.')
+    if n_samples > 0:
+        X2_inter_2 = diff_dataset['inter_2'] #  Diffusion model samples for first intermediate domain
+        idxs = np.arange(0,X2_inter_2.shape[0])
+        sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
+        X2_inter_2 = X2_inter_2[sampled_idxs] # Subsampled diffusion model samples
+
+        # Append diffusion model samples to original data with dummy target labels
+        X_inter_2 = np.concatenate([X_inter_2, X2_inter_2], axis=0)
+        Y_inter_2 = np.concatenate([Y_inter_2, np.zeros((n_samples,2))], axis=0)
+        print(f'Appended {n_samples} diffusion samples to second intermediate domain data.')
+    
     print(f'X: {X_inter_2.shape}')
     print(f'Y: {Y_inter_2.shape}')
 
@@ -476,6 +481,7 @@ def main(**kwargs):
     model_names = [
         'no-adapt',
         'direct',
+        'gradual_0',
         'gradual_3000',
         'gradual_6000',
         'gradual_9000',
@@ -507,7 +513,8 @@ def main(**kwargs):
         for i, seed in enumerate(seeds):
             print(f'[{i+1}] Manual Seed = {seed}')
             if model == 'gradual':
-                loss, acc = exp_f(dataset, diff_dataset, seed=seed)
+                n_samples = int(model_name.split('_')[1])
+                loss, acc = exp_f(dataset, diff_dataset, n_samples=n_samples, seed=seed)
             else:
                 loss, acc = exp_f(dataset, seed=seed)
 
