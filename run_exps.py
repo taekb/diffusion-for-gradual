@@ -18,7 +18,7 @@ from tensorflow.keras.losses import CategoricalCrossentropy
 from tensorflow.keras.metrics import BinaryAccuracy, CategoricalAccuracy
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.initializers import GlorotUniform
-from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.activations import softmax, relu
 from tensorflow.keras.utils import to_categorical
@@ -128,12 +128,15 @@ def exp_no_adapt(dataset, seed=DEFAULT_SEED):
     val_generator = datagen.flow(X_source_val, Y_source_val, **GENERATOR_CONFIG)
 
     print('Training on the source data...')
+    model_file_name = f'./models/no_adapt_{seed}.h5'
     history = model.fit(
                   train_generator, 
                   validation_data=val_generator,
                   epochs=150,
-                  callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                  callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
               )
+    model.load_weights(model_file_name) # Load best model
     
     # Evaluate on the held-out target data
     X_target, Y_target = dataset['target']
@@ -178,12 +181,15 @@ def exp_direct(dataset, seed=DEFAULT_SEED):
     val_generator = datagen.flow(X_source_val, Y_source_val, **GENERATOR_CONFIG)
 
     print('Training on the source data...')
+    model_file_name = f'./models/direct_{seed}.h5'
     history = model.fit(
                   train_generator, 
                   validation_data=val_generator,
                   epochs=150,
-                  callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                  callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
               )
+    model.load_weights(model_file_name)
     
     # Evaluate on the held-out target data
     X_target, Y_target = dataset['target']
@@ -220,12 +226,15 @@ def exp_direct(dataset, seed=DEFAULT_SEED):
         metrics=[CategoricalAccuracy()]
     )
 
+    model_file_name = f'./models/direct_{seed}.h5'
     new_history = new_model.fit(
                       target_train_generator, 
                       validation_data=target_val_generator,
                       epochs=150,
-                      callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                      callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                                 ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
                   )
+    new_model.load_weights(model_file_name)
 
     # Evaluate on target test data using ground-truth labels
     print('Evaluating on the target test data...')
@@ -262,12 +271,15 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     val_generator = datagen.flow(X_source_val, Y_source_val, **GENERATOR_CONFIG)
 
     print('Training on the source data...')
+    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
     history = model.fit(
                   train_generator, 
                   validation_data=val_generator,
                   epochs=150,
-                  callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                  callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
               )
+    model.load_weights(model_file_name)
     
     # Randomly subsample a set number of diffusion model samples
     X_inter_1, Y_inter_1 = dataset['inter_1']
@@ -311,12 +323,15 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
         metrics=[CategoricalAccuracy()]
     )
 
+    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
     inter_1_history = inter_1_model.fit(
                           inter_1_train_generator, 
                           validation_data=inter_1_val_generator,
                           epochs=150,
-                          callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                          callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                                     ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
                       )
+    inter_1_model.load_weights(model_file_name)
     
     # Randomly subsample a set number of diffusion model samples
     X_inter_2, Y_inter_2 = dataset['inter_2']
@@ -360,12 +375,15 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
         metrics=[CategoricalAccuracy()]
     )
 
+    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
     inter_2_history = inter_2_model.fit(
                           inter_2_train_generator, 
                           validation_data=inter_2_val_generator,
                           epochs=150,
-                          callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                          callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                                     ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
                       )
+    inter_2_model.load_weights(model_file_name)
     
     # Get train-val-test split on target data
     X_target, Y_target = dataset['target']
@@ -400,12 +418,15 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
         metrics=[CategoricalAccuracy()]
     )
 
+    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
     target_history = target_model.fit(
                          target_train_generator, 
                          validation_data=target_val_generator,
                          epochs=150,
-                         callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                         callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                                    ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
                      )
+    target_model.load_weights(model_file_name)
     
     # Evaluate on target test data using ground-truth labels
     print('Evaluating on the target test data...')
@@ -449,12 +470,15 @@ def exp_oracle(dataset, seed=DEFAULT_SEED):
     target_test_generator = datagen.flow(X_target_test, Y_target_test, batch_size=N_target_test, shuffle=False)
 
     print('Training on the target data...')
+    model_file_name = f'./oracle_{seed}.h5'
     history = model.fit(
                   train_generator, 
                   validation_data=val_generator,
                   epochs=150,
-                  callbacks=[EarlyStopping(monitor='val_loss', patience=10, verbose=1)]
+                  callbacks=[EarlyStopping(monitor='val_loss', patience=20, verbose=1),
+                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
               )
+    model.load_weights(model_file_name)
 
     print('Evaluating on the target test data...')
     final_loss, final_acc = model.evaluate(target_test_generator)
