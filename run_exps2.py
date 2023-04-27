@@ -28,7 +28,6 @@ from tensorflow.keras.utils import to_categorical
 
 from sklearn.model_selection import train_test_split
 
-# %%
 # CONSTANTS
 DATA_PATH = '../dataset.pkl'
 DIFF_PATH_1 = '../class0_compressed_12288x64x64.npz'
@@ -38,7 +37,6 @@ GENERATOR_CONFIG = dict(
     batch_size=256
 )
 
-# %%
 '''
     Experimental Settings:
     1. No Adaptation (Train on Source, Evaluate on Target without Any Adaptation on Unlabeled Target Data)
@@ -152,8 +150,6 @@ def exp_no_adapt(dataset, seed=DEFAULT_SEED):
     final_loss, final_acc = model.evaluate(target_test_generator)
     print(f'\nAccuracy on Target Test Data: {final_acc}')
 
-    # Save the trained model
-    # model.save(f'./models/no_adapt_{seed}.h5')
 
     return final_acc
 
@@ -238,12 +234,10 @@ def exp_direct(dataset, seed=DEFAULT_SEED):
     final_loss, final_acc = model.evaluate(target_test_generator)
     print(f'\nAccuracy on Target Test Data: {final_acc}')
 
-    # Save the trained model
-    # new_model.save(f'./models/direct_{seed}.h5')
 
     return final_acc
 
-def exp_gradual_base(dataset, n_samples=3000, seed=DEFAULT_SEED):
+def exp_gradualXY(dataset, diff_dataset, n_orig_sample=3000, n_samples=3000, seed=DEFAULT_SEED):
     '''Gradual adaptation approach, with two unlabeled intermediate domain data.'''
 
     # NOTE: n_samples is the number of randomly sampled data from each intermediate domain
@@ -266,170 +260,7 @@ def exp_gradual_base(dataset, n_samples=3000, seed=DEFAULT_SEED):
     train_generator = datagen.flow(X_source_train, Y_source_train, **GENERATOR_CONFIG)
     val_generator = datagen.flow(X_source_val, Y_source_val, **GENERATOR_CONFIG)
 
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
-    print('Training on the source data...')
-    history = model.fit(
-                  train_generator, 
-                  validation_data=val_generator,
-                  epochs=200,
-                  callbacks=[EarlyStopping(monitor='val_loss', patience=30, verbose=1),
-                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
-              )
-    model.load_weights(model_file_name)
-    
-    # Randomly subsample a set number of diffusion model samples
-    X_inter_1, Y_inter_1 = dataset['inter_1']
-    idxs = np.arange(0,X_inter_1.shape[0])
-    sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
-    X_inter_1 = X_inter_1[sampled_idxs]
-    Y_inter_1 = Y_inter_1[sampled_idxs]
-    
-    print(f'X: {X_inter_1.shape}')
-    print(f'Y: {Y_inter_1.shape}')
-
-    # Get train-val split on first intermediate data
-    X_inter_1_train, X_inter_1_val, Y_inter_1_train, Y_inter_1_val = train_test_split(X_inter_1, Y_inter_1, test_size=0.2, random_state=seed)
-
-    # Generate pseudolabels for first intermediate data using source model
-    inter_1_train_generator = datagen.flow(X_inter_1_train, shuffle=False, **GENERATOR_CONFIG)
-    inter_1_val_generator = datagen.flow(X_inter_1_val, shuffle=False, **GENERATOR_CONFIG)
-
-    Y_inter_1_train_pseudo = to_categorical(np.argmax(model.predict(inter_1_train_generator), axis=1), num_classes=2)
-    Y_inter_1_val_pseudo = to_categorical(np.argmax(model.predict(inter_1_val_generator), axis=1), num_classes=2)
-
-    # Update generators with pseudolabels
-    inter_1_datagen = ImageDataGenerator(rescale=1./255)
-    inter_1_datagen.fit(X_inter_1_train)
-    inter_1_train_generator = inter_1_datagen.flow(X_inter_1_train, Y_inter_1_train_pseudo, **GENERATOR_CONFIG)
-    inter_1_val_generator = inter_1_datagen.flow(X_inter_1_val, Y_inter_1_val_pseudo, **GENERATOR_CONFIG)
-
-    # Train new model on pseudolabeled first intermediate data
-    print('\nSelf-training with pseudolabeled first intermediate data...\n')
-
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
-    inter_1_history = model.fit(
-                          inter_1_train_generator, 
-                          validation_data=inter_1_val_generator,
-                          epochs=200,
-                          callbacks=[EarlyStopping(monitor='val_loss', patience=30, verbose=1),
-                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
-                      )
-    
-    model.load_weights(model_file_name)
-    
-    # Randomly subsample a set number of diffusion model samples
-    X_inter_2, Y_inter_2 = dataset['inter_2']
-    idxs = np.arange(0,X_inter_2.shape[0])
-    sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
-    X_inter_2 = X_inter_2[sampled_idxs]
-    Y_inter_2 = Y_inter_2[sampled_idxs]
-    
-    print(f'X: {X_inter_2.shape}')
-    print(f'Y: {Y_inter_2.shape}')
-
-    # Get train-val split on second intermediate data
-    X_inter_2_train, X_inter_2_val, Y_inter_2_train, Y_inter_2_val = train_test_split(X_inter_2, Y_inter_2, test_size=0.2, random_state=seed)
-
-    # Generate pseudolabels for second intermediate data using first intermediate model
-    inter_2_train_generator = datagen.flow(X_inter_2_train, shuffle=False, **GENERATOR_CONFIG)
-    inter_2_val_generator = datagen.flow(X_inter_2_val, shuffle=False, **GENERATOR_CONFIG)
-
-    Y_inter_2_train_pseudo = to_categorical(np.argmax(model.predict(inter_2_train_generator), axis=1), num_classes=2)
-    Y_inter_2_val_pseudo = to_categorical(np.argmax(model.predict(inter_2_val_generator), axis=1), num_classes=2)
-
-    # Update generators with pseudolabels
-    inter_2_datagen = ImageDataGenerator(rescale=1./255)
-    inter_2_datagen.fit(X_inter_2_train)
-    inter_2_train_generator = inter_2_datagen.flow(X_inter_2_train, Y_inter_2_train_pseudo, **GENERATOR_CONFIG)
-    inter_2_val_generator = inter_2_datagen.flow(X_inter_2_val, Y_inter_2_val_pseudo, **GENERATOR_CONFIG)
-
-    # Train new model on pseudolabeled first intermediate data
-    print('\nSelf-training with pseudolabeled second intermediate data...\n')
-
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
-    inter_2_history = model.fit(
-                          inter_2_train_generator, 
-                          validation_data=inter_2_val_generator,
-                          epochs=200,
-                          callbacks=[EarlyStopping(monitor='val_loss', patience=30, verbose=1),
-                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
-                      )
-    model.load_weights(model_file_name)
-    
-    # Get train-val-test split on target data
-    X_target, Y_target = dataset['target']
-    N_target = X_target.shape[0]
-    N_target_train = int(0.6 * N_target)
-    N_target_val = int(0.1 * N_target)
-    N_target_test = int(0.3 * N_target)
-
-    X_target_train, X_target_test, Y_target_train, Y_target_test = train_test_split(X_target, Y_target, test_size=N_target_test,
-                                                                                    random_state=0) # NOTE: Always use 0.
-    X_target_train, X_target_val, Y_target_train, Y_target_val = train_test_split(X_target_train, Y_target_train, test_size=N_target_val)
-
-    # Generate pseudolabels
-    target_train_generator = inter_2_datagen.flow(X_target_train, shuffle=False, **GENERATOR_CONFIG)
-    target_val_generator = inter_2_datagen.flow(X_target_val, shuffle=False, **GENERATOR_CONFIG)
-
-    Y_target_train_pseudo = to_categorical(np.argmax(model.predict(target_train_generator), axis=1), num_classes=2)
-    Y_target_val_pseudo = to_categorical(np.argmax(model.predict(target_val_generator), axis=1), num_classes=2)
-
-    # Update generators with pseudolabels
-    target_datagen = ImageDataGenerator(rescale=1./255)
-    target_datagen.fit(X_target_train)
-    target_train_generator = target_datagen.flow(X_target_train, Y_target_train_pseudo, **GENERATOR_CONFIG)
-    target_val_generator = target_datagen.flow(X_target_val, Y_target_val_pseudo, **GENERATOR_CONFIG)
-
-    # Train new model on pseudolabeled target data
-    print('\nSelf-training with pseudolabeled target data...\n')
-
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
-    target_history = model.fit(
-                         target_train_generator, 
-                         validation_data=target_val_generator,
-                         epochs=200,
-                         callbacks=[EarlyStopping(monitor='val_loss', patience=30, verbose=1),
-                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
-                     )
-    model.load_weights(model_file_name)
-    
-    # Evaluate on target test data using ground-truth labels
-    print('Evaluating on the target test data...')
-    target_test_generator = target_datagen.flow(X_target_test, Y_target_test, batch_size=N_target_test, shuffle=False)
-    final_loss, final_acc = model.evaluate(target_test_generator)
-    print(f'\nAccuracy on Target Test Data: {final_acc}')
-
-    # Save the trained model
-    # target_model.save(f'./models/gradual_{n_samples}_{seed}.h5')
-
-    return final_acc
-
-# %%
-# TODO: Modify this code to add samples from diffusion model
-def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
-    '''Gradual adaptation approach, with two unlabeled intermediate domain data.'''
-
-    # NOTE: n_samples is the number of randomly sampled data from each intermediate domain
-
-    # Initialize model
-    model = get_model(seed=seed)
-    model.compile(
-        optimizer=Adam(learning_rate=1e-3),
-        loss=CategoricalCrossentropy(),
-        metrics=[CategoricalAccuracy()]
-    )
-
-    # Train on source data
-    X_source, Y_source = dataset['source']
-    X_source_train, X_source_val, Y_source_train, Y_source_val = train_test_split(X_source, Y_source, test_size=0.2, random_state=seed)
-
-    datagen = ImageDataGenerator(rescale=1./255)
-    datagen.fit(X_source_train)
-
-    train_generator = datagen.flow(X_source_train, Y_source_train, **GENERATOR_CONFIG)
-    val_generator = datagen.flow(X_source_val, Y_source_val, **GENERATOR_CONFIG)
-
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
+    model_file_name = f'./models/gradual_{n_samples}_4_{seed}.h5'
     print('Training on the source data...')
     history = model.fit(
                   train_generator, 
@@ -444,6 +275,11 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     X_inter_1, Y_inter_1 = dataset['inter_1']
     
     if n_samples > 0:
+        orig_idxs = np.arange(0, X_inter_1.shape[0])
+        sampled_idxs, _ = train_test_split(orig_idxs, train_size=n_orig_sample, random_state=seed)
+        X_inter_1 = X_inter_1[sampled_idxs] # Subsampled diffusion model samples
+        Y_inter_1 = Y_inter_1[sampled_idxs]
+
         X2_inter_1 = diff_dataset['inter_1'] #  Diffusion model samples for first intermediate domain
         idxs = np.arange(0,X2_inter_1.shape[0])
         sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
@@ -476,7 +312,7 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     # Train new model on pseudolabeled first intermediate data
     print('\nSelf-training with pseudolabeled first intermediate data...\n')
 
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
+    # model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
     inter_1_history = model.fit(
                           inter_1_train_generator, 
                           validation_data=inter_1_val_generator,
@@ -491,6 +327,11 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     X_inter_2, Y_inter_2 = dataset['inter_2']
 
     if n_samples > 0:
+        orig_idxs = np.arange(0, X_inter_2.shape[0])
+        sampled_idxs, _ = train_test_split(orig_idxs, train_size=n_orig_sample, random_state=seed)
+        X_inter_2 = X_inter_2[sampled_idxs] # Subsampled diffusion model samples
+        Y_inter_2 = Y_inter_2[sampled_idxs]
+
         X2_inter_2 = diff_dataset['inter_2'] #  Diffusion model samples for first intermediate domain
         idxs = np.arange(0,X2_inter_2.shape[0])
         sampled_idxs, _ = train_test_split(idxs, train_size=n_samples, random_state=seed)
@@ -523,7 +364,6 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     # Train new model on pseudolabeled first intermediate data
     print('\nSelf-training with pseudolabeled second intermediate data...\n')
 
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
     inter_2_history = model.fit(
                           inter_2_train_generator, 
                           validation_data=inter_2_val_generator,
@@ -560,7 +400,6 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     # Train new model on pseudolabeled target data
     print('\nSelf-training with pseudolabeled target data...\n')
 
-    model_file_name = f'./models/gradual_{n_samples}_{seed}.h5'
     target_history = model.fit(
                          target_train_generator, 
                          validation_data=target_val_generator,
@@ -576,12 +415,86 @@ def exp_gradual(dataset, diff_dataset, n_samples=3000, seed=DEFAULT_SEED):
     final_loss, final_acc = model.evaluate(target_test_generator)
     print(f'\nAccuracy on Target Test Data: {final_acc}')
 
-    # Save the trained model
-    # target_model.save(f'./models/gradual_{n_samples}_{seed}.h5')
+    return final_acc
+
+def exp_best_adapt(dataset, seed=DEFAULT_SEED):
+    '''best adaptation baseline.'''
+
+    # Initialize model
+    model = get_model(seed=seed)
+    model.compile(
+        optimizer=Adam(learning_rate=1e-3),
+        loss=CategoricalCrossentropy(),
+        metrics=[CategoricalAccuracy()]
+    )
+
+    # Train on source data
+    X_source, Y_source = dataset['inter_2']
+    X_source_train, X_source_val, Y_source_train, Y_source_val = train_test_split(X_source, Y_source, test_size=0.2, random_state=seed)
+
+    datagen = ImageDataGenerator(rescale=1./255)
+    datagen.fit(X_source_train)
+
+    train_generator = datagen.flow(X_source_train, Y_source_train, **GENERATOR_CONFIG)
+    val_generator = datagen.flow(X_source_val, Y_source_val, **GENERATOR_CONFIG)
+
+    model_file_name = f'./models/direct_{seed}.wts.h5'
+    print('Training on the source data...')
+    history = model.fit(
+                  train_generator, 
+                  validation_data=val_generator,
+                  epochs=200,
+                  callbacks=[EarlyStopping(monitor='val_loss', patience=30, verbose=1),
+                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
+              )
+    model.load_weights(model_file_name)
+    
+    # Evaluate on the held-out target data
+    X_target, Y_target = dataset['target']
+    N_target = X_target.shape[0]
+
+    N_target_train = int(0.6 * N_target)
+    N_target_val = int(0.1 * N_target)
+    N_target_test = int(0.3 * N_target)
+    
+    X_target_train, X_target_test, Y_target_train, Y_target_test = train_test_split(X_target, Y_target, test_size=N_target_test,
+                                                                                    random_state=0) # NOTE: This should be fixed for all exps.
+    X_target_train, X_target_val, Y_target_train, Y_target_val = train_test_split(X_target_train, Y_target_train, test_size=N_target_val,
+                                                                                  random_state=seed)
+    
+    # Generate pseudolabels for target training and validation data
+    target_train_generator = datagen.flow(X_target_train, shuffle=False, **GENERATOR_CONFIG)
+    target_val_generator = datagen.flow(X_target_val, shuffle=False, **GENERATOR_CONFIG)
+
+    Y_target_train_pseudo = tf.keras.utils.to_categorical(np.argmax(model.predict(target_train_generator), axis=1), num_classes=2)
+    Y_target_val_pseudo = tf.keras.utils.to_categorical(np.argmax(model.predict(target_val_generator), axis=1), num_classes=2)
+    
+    # Update generators with pseudolabels
+    new_datagen = ImageDataGenerator(rescale=1./255)
+    new_datagen.fit(X_target_train)
+    target_train_generator = new_datagen.flow(X_target_train, Y_target_train_pseudo, **GENERATOR_CONFIG)
+    target_val_generator = new_datagen.flow(X_target_val, Y_target_val_pseudo, **GENERATOR_CONFIG)
+
+    # Train new model on pseudolabeled target data
+    print('\nSelf-training with pseudolabeled target data...\n')
+
+    new_history = model.fit(
+                      target_train_generator, 
+                      validation_data=target_val_generator,
+                      epochs=200,
+                      callbacks=[EarlyStopping(monitor='val_loss', patience=30, verbose=1),
+                             ModelCheckpoint(model_file_name, monitor='val_loss', verbose=0, save_best_only=True, mode='auto')]
+                  )
+    model.load_weights(model_file_name)
+
+    # Evaluate on target test data using ground-truth labels
+    print('Evaluating on the target test data...')
+    target_test_generator = datagen.flow(X_target_test, Y_target_test, batch_size=N_target_test, shuffle=False)
+    final_loss, final_acc = model.evaluate(target_test_generator)
+    print(f'\nAccuracy on Target Test Data: {final_acc}')
 
     return final_acc
 
-# %%
 def exp_oracle(dataset, seed=DEFAULT_SEED):
     '''No adaptation baseline.'''
 
@@ -649,24 +562,25 @@ def main(**kwargs):
     model_names = [
         'no-adapt',
         'direct',
-        'gradualbase_1500',
-        'gradualbase_3000',
-        'gradual_0',
-        'gradual_3000',
-        'gradual_6000',
-        'gradual_9000',
-        'gradual_12000',
+        'gradualXY_1.5_0',
+        'gradualXY_1.5_3',
+        'gradualXY_1.5_6',
+        'gradualXY_1.5_9',
+        'gradualXY_1.5_12',
+        'gradualXY_3_0',
+        'gradualXY_3_3',
+        'gradualXY_3_6',
+        'gradualXY_3_9',
+        'gradualXY_3_12',
+        'gradualXY_6_0',
+        'gradualXY_6_3',
+        'gradualXY_6_6',
+        'gradualXY_6_9',
+        'gradualXY_6_12',
+        'bestAdapt'
         'oracle'
     ]
 
-    # model_names = [
-    #     'gradualbase_3000',
-    #     'gradual_0',
-    #     'gradual_3000',
-    #     'gradual_6000',
-    #     'gradual_9000',
-    #     'gradual_12000',
-    # ]
     acc_dict = defaultdict(list)
     start_time = datetime.now()
     dict_list = []
@@ -683,13 +597,13 @@ def main(**kwargs):
                 exp_f = exp_direct
                 print('Training the "Direct Adaptation" baseline.')
 
-            elif model == 'gradualbase':
-                exp_f = exp_gradual_base
-                print('Training the "Gradual Adaptation" baseline.')
+            elif model == 'gradualXY':
+                exp_f = exp_gradualXY
+                print('Training the "Gradual Adaptation" model ' + model_name.split('_')[1] + "_" + model_name.split('_')[2])
 
-            elif model == 'gradual':
-                exp_f = exp_gradual
-                print('Training the "Gradual Adaptation" model.')
+            elif model == 'bestAdapt':
+                exp_f = exp_best_adapt
+                print('Training the "Best Adaptation" model.')
 
             else:
                 exp_f = exp_oracle
@@ -697,17 +611,16 @@ def main(**kwargs):
 
             
             print(f'[{i+1}] Manual Seed = {seed}')
-            if model == 'gradual':
+            if model == 'gradualXY':
+                n_orig_samples = int(model_name.split('_')[1])
                 n_samples = int(model_name.split('_')[1])
-                acc = exp_f(dataset, diff_dataset, n_samples=n_samples, seed=seed)
-            elif model == 'gradualbase':
-                n_samples = int(model_name.split('_')[1])
-                acc = exp_f(dataset, n_samples=n_samples, seed=seed)
+                acc = exp_f(dataset, diff_dataset ,n_orig_sample=n_orig_samples, n_samples=n_samples, seed=seed)
+
             else:
                 acc = exp_f(dataset, seed=seed)
 
             acc_dict[model_name] = acc
-            with open(f'./log{seeds[0]}.log', 'a') as fh:
+            with open(f'./log.log', 'a') as fh:
                 fh.write(str(acc_dict))
                 fh.write("\n")
         dict_list.append(acc_dict)
@@ -715,26 +628,22 @@ def main(**kwargs):
     if (not os.path.exists("./results")):
         os.makedirs("./results")
 
-    with open(f'./results/adapt_results_{seeds[0]}.pkl', 'wb') as fh:
+    with open(f'./results/adapt_results.pkl', 'wb') as fh:
         pickle.dump(dict_list, fh)
 
     for model_name in model_names:
         print(f'[{model_name}] Mean={np.mean(acc_dict[model_name])}, Std={np.std(acc_dict[model_name])}')
     
     
-    with open(f'./results/adapt_results_{seeds[0]}.csv', 'w') as file:
+    with open(f'./results/adapt_results.csv', 'w') as file:
         writer = csv.DictWriter(file, fieldnames=acc_dict.keys())
         writer.writeheader()
         for row in dict_list:
             writer.writerow(row)
 
 
-
-
-# %%
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    #parser.add_argument('--exp', help='Choice of experiment to run', default='gradual', type=str)
     parser.add_argument('--seeds', help='Random seeds', default=[DEFAULT_SEED], nargs='*', type=int)
     args = parser.parse_args()
 
